@@ -1,0 +1,6 @@
+{
+  "processed_data_dir": "data/processed",
+  "processed_data_filename": "enriched_results_sample.csv",
+  "annotations_dir": "annotations",
+  "collection_date": "2026-06-26"
+}

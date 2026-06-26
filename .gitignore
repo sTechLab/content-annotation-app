@@ -1,0 +1,15 @@
+# Local annotation outputs
+annotations/raw/
+annotations/combined/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Tool and editor files
+.streamlit/secrets.toml
+.DS_Store
+.vscode/
+.idea/
