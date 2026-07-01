@@ -9,12 +9,13 @@ import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = PROJECT_ROOT / "config" / "config.json"
+SAMPLE_MODE = "Sample"
 
 ANNOTATION_COLUMNS = [
     "annotation_id",
     "annotation_datetime",
     "coder_name",
-    "clean_coding_mode",
+    "annotation_mode",
     "item_id",
     "post_url",
     "skipped",
@@ -26,6 +27,7 @@ ANNOTATION_COLUMNS = [
     "labels_selected",
     "labels_added",
     "labels_final",
+    "star",
     "coder_notes",
 ]
 
@@ -45,6 +47,8 @@ def load_config() -> dict[str, Any]:
 
 def ensure_columns(df: pd.DataFrame) -> pd.DataFrame:
     df = df.where(pd.notna(df), "").astype(str)
+    if "annotation_mode" not in df.columns and "clean_coding_mode" in df.columns:
+        df["annotation_mode"] = SAMPLE_MODE
     for column in ANNOTATION_COLUMNS:
         if column not in df.columns:
             df[column] = ""
@@ -60,7 +64,10 @@ def merge_annotations(raw_dir: Path) -> pd.DataFrame:
     merged = pd.concat(frames, ignore_index=True)
     merged = merged.where(pd.notna(merged), "").astype(str)
     merged = merged.sort_values("annotation_datetime")
-    merged = merged.drop_duplicates(["coder_name", "item_id"], keep="last")
+    merged = merged.drop_duplicates(
+        ["coder_name", "annotation_mode", "item_id"],
+        keep="last",
+    )
 
     return merged[ANNOTATION_COLUMNS]
 

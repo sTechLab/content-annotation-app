@@ -19,13 +19,18 @@ load_dotenv()
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = PROJECT_ROOT / "config" / "config.json"
 TAGS_PATH = PROJECT_ROOT / "config" / "tags.json"
+LABELS_PATH = PROJECT_ROOT / "config" / "labels.json"
 PUBLIC_BSKY_THREAD_API = "https://public.api.bsky.app/xrpc/app.bsky.feed.getPostThread"
 THREAD_DEPTH = 100
 THREAD_PARENT_HEIGHT = 100
+SAMPLE_MODE = "Sample"
+FULL_MODE = "Full"
+ANNOTATION_MODES = [SAMPLE_MODE, FULL_MODE]
 
 DEFAULT_CONFIG = {
     "processed_data_dir": "data/processed",
-    "processed_data_filename": "enriched_results_sample.csv",
+    "sample_data_filename": "enriched_results_sample.csv",
+    "full_data_filename": "enriched_results.csv",
     "annotations_dir": "annotations",
     "collection_date": "",
 }
@@ -53,7 +58,7 @@ ANNOTATION_COLUMNS = [
     "annotation_id",
     "annotation_datetime",
     "coder_name",
-    "clean_coding_mode",
+    "annotation_mode",
     "item_id",
     "post_url",
     "skipped",
@@ -65,6 +70,7 @@ ANNOTATION_COLUMNS = [
     "labels_selected",
     "labels_added",
     "labels_final",
+    "star",
     "coder_notes",
 ]
 
@@ -93,6 +99,10 @@ def safe_value(value: Any) -> str:
     return str(value)
 
 
+def value_is_true(value: Any) -> bool:
+    return safe_value(value).strip().lower() in {"1", "true", "yes"}
+
+
 def load_json(path: Path, default: Any) -> Any:
     if not path.is_file():
         return default
@@ -118,9 +128,21 @@ def collection_date_from_config(config: dict[str, Any]) -> str:
     return configured_date or os.getenv("ANALYSIS_DATE") or today_string()
 
 
-def processed_csv_path(config: dict[str, Any], collection_date: str) -> Path:
+def processed_csv_path(
+    config: dict[str, Any],
+    collection_date: str,
+    annotation_mode: str,
+) -> Path:
     data_dir = project_path(config["processed_data_dir"])
-    filename = str(config.get("processed_data_filename") or "enriched_results_sample.csv")
+    filename_key = (
+        "full_data_filename" if annotation_mode == FULL_MODE else "sample_data_filename"
+    )
+    default_filename = (
+        "enriched_results.csv"
+        if annotation_mode == FULL_MODE
+        else "enriched_results_sample.csv"
+    )
+    filename = str(config.get(filename_key) or default_filename)
     return data_dir / collection_date / filename
 
 
@@ -133,12 +155,21 @@ def safe_coder_slug(coder_name: str) -> str:
     return slug or "coder"
 
 
-def annotation_file_path(root: Path, coder_name: str) -> Path:
-    return root / "raw" / f"{safe_coder_slug(coder_name)}_annotations.csv"
+def annotation_file_path(
+    root: Path,
+    coder_name: str,
+    annotation_mode: str,
+) -> Path:
+    mode_suffix = "_full" if annotation_mode == FULL_MODE else ""
+    return root / "raw" / f"{safe_coder_slug(coder_name)}{mode_suffix}_annotations.csv"
 
 
-def stable_annotation_id(coder_name: str, item_id: str) -> str:
-    value = f"{coder_name}|{item_id}".encode("utf-8")
+def stable_annotation_id(
+    coder_name: str,
+    annotation_mode: str,
+    item_id: str,
+) -> str:
+    value = f"{coder_name}|{annotation_mode}|{item_id}".encode("utf-8")
     return hashlib.sha256(value).hexdigest()[:16]
 
 
@@ -166,6 +197,21 @@ def join_values(values: list[str]) -> str:
 @st.cache_data
 def load_posts(path: str) -> pd.DataFrame:
     return pd.read_csv(path)
+
+
+def order_posts_for_mode(
+    posts: pd.DataFrame,
+    annotation_mode: str,
+    coder_name: str,
+    collection_date: str,
+) -> pd.DataFrame:
+    """Keep Sample fixed and shuffle Full reproducibly for each coder."""
+    if annotation_mode == SAMPLE_MODE:
+        return posts.reset_index(drop=True)
+
+    seed_value = f"{collection_date}|{coder_name.strip().casefold()}".encode("utf-8")
+    random_seed = int(hashlib.sha256(seed_value).hexdigest()[:8], 16)
+    return posts.sample(frac=1, random_state=random_seed).reset_index(drop=True)
 
 
 @st.cache_data(ttl=300)
@@ -206,6 +252,8 @@ def load_annotations(path: Path) -> pd.DataFrame:
         return pd.DataFrame(columns=ANNOTATION_COLUMNS)
 
     df = pd.read_csv(path, dtype=str).fillna("")
+    if "annotation_mode" not in df.columns and "clean_coding_mode" in df.columns:
+        df["annotation_mode"] = SAMPLE_MODE
     for column in ANNOTATION_COLUMNS:
         if column not in df.columns:
             df[column] = ""
@@ -269,6 +317,12 @@ def progress_counts(
     annotated_count = max(handled_count - int(skipped_count), 0)
     remaining_count = max(len(posts) - handled_count, 0)
     return annotated_count, int(skipped_count), remaining_count
+
+
+def handled_progress(annotated_count: int, skipped_count: int, total: int) -> float:
+    if total <= 0:
+        return 0.0
+    return min((annotated_count + skipped_count) / total, 1.0)
 
 
 def next_unhandled_post(posts: pd.DataFrame, handled: set[str]) -> pd.Series | None:
@@ -346,13 +400,27 @@ def options_from_annotations(annotations: pd.DataFrame, column: str) -> list[str
     return unique_values(values)
 
 
+def available_coding_options(
+    configured_options: list[str],
+    coder_options: list[str],
+    annotation_mode: str,
+) -> list[str]:
+    """Return coder-only options for Sample and configured options for Full."""
+    if annotation_mode == SAMPLE_MODE:
+        return unique_values(coder_options)
+    return unique_values(configured_options + coder_options)
+
+
 def save_annotation(path: Path, row: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     annotations = load_annotations(path)
     updated = pd.concat([annotations, pd.DataFrame([row])], ignore_index=True)
     updated = updated.where(pd.notna(updated), "").astype(str)
     updated = updated.sort_values("annotation_datetime")
-    updated = updated.drop_duplicates(["coder_name", "item_id"], keep="last")
+    updated = updated.drop_duplicates(
+        ["coder_name", "annotation_mode", "item_id"],
+        keep="last",
+    )
     updated = updated[ANNOTATION_COLUMNS]
     updated.to_csv(path, index=False)
 
@@ -360,13 +428,14 @@ def save_annotation(path: Path, row: dict[str, Any]) -> None:
 def build_annotation_row(
     post: pd.Series,
     coder_name: str,
-    clean_coding_mode: bool,
+    annotation_mode: str,
     skipped: bool,
     is_relevant: str,
     tags_selected: list[str],
     tags_added: list[str],
     labels_selected: list[str],
     labels_added: list[str],
+    starred: bool,
     coder_notes: str,
 ) -> dict[str, Any]:
     item_id = safe_value(post.get("item_id"))
@@ -378,10 +447,10 @@ def build_annotation_row(
         labels_added = []
 
     row = {
-        "annotation_id": stable_annotation_id(coder_name, item_id),
+        "annotation_id": stable_annotation_id(coder_name, annotation_mode, item_id),
         "annotation_datetime": now,
         "coder_name": coder_name,
-        "clean_coding_mode": clean_coding_mode,
+        "annotation_mode": annotation_mode,
         "item_id": item_id,
         "post_url": safe_value(post.get("post_url")),
         "skipped": skipped,
@@ -393,6 +462,7 @@ def build_annotation_row(
         "labels_selected": join_values(labels_selected),
         "labels_added": join_values(labels_added),
         "labels_final": join_values(labels_selected + labels_added),
+        "star": starred,
         "coder_notes": coder_notes,
     }
 
@@ -521,9 +591,8 @@ def display_post(post: pd.Series) -> None:
     render_thread(post)
 
 
-def render_setup_screen(collection_date: str, input_label: str, post_count: int) -> None:
-    st.caption(f"Collection date: {collection_date} · Posts loaded: {post_count}")
-    st.caption(f"Input: {input_label}")
+def render_setup_screen(collection_date: str) -> None:
+    st.caption(f"Collection date: {collection_date}")
     st.info(
         "You will review Bluesky posts one at a time. For each post, decide whether "
         "it is relevant, add useful tags, and note any label names mentioned. Use "
@@ -533,12 +602,16 @@ def render_setup_screen(collection_date: str, input_label: str, post_count: int)
 
     with st.form("coder_setup_form"):
         coder_name = st.text_input("Coder name")
-        clean_coding_mode = st.radio(
-            "Clean coding mode?",
-            ["Yes", "No"],
+        annotation_mode = st.radio(
+            "Dataset",
+            ANNOTATION_MODES,
+            index=ANNOTATION_MODES.index(FULL_MODE),
             horizontal=True,
-            help="Clean mode starts with no shared tag suggestions. Your own tags will appear after you create them.",
-        ) == "Yes"
+            help=(
+                "Sample: fixed 98 posts without preset options. "
+                "Full: all June 26 posts, shuffled per coder, with preset options."
+            ),
+        )
         started = st.form_submit_button("Start annotation")
 
     if not started:
@@ -550,7 +623,7 @@ def render_setup_screen(collection_date: str, input_label: str, post_count: int)
         st.stop()
 
     st.session_state["coder_name"] = coder_name
-    st.session_state["clean_coding_mode"] = clean_coding_mode
+    st.session_state["annotation_mode"] = annotation_mode
     st.session_state["setup_complete"] = True
     rerun_app()
 
@@ -571,9 +644,46 @@ def disable_enter_submit() -> None:
     )
 
 
+def apply_app_styles() -> None:
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stCheckbox"] label[data-baseweb="checkbox"] > span:first-child {
+            align-items: center;
+            background: transparent !important;
+            border: 0 !important;
+            display: flex;
+            flex: 0 0 1.8rem;
+            height: 1.8rem;
+            justify-content: center;
+            width: 1.8rem;
+        }
+        div[data-testid="stCheckbox"] label[data-baseweb="checkbox"] > span:first-child > div {
+            display: none;
+        }
+        div[data-testid="stCheckbox"] label[data-baseweb="checkbox"] > span:first-child::before {
+            color: #8a8f98;
+            content: "☆";
+            font-size: 1.65rem;
+            line-height: 1;
+        }
+        div[data-testid="stCheckbox"] label[data-baseweb="checkbox"]:hover > span:first-child::before {
+            color: #d6a900;
+        }
+        div[data-testid="stCheckbox"] label[data-baseweb="checkbox"]:has(input:checked) > span:first-child::before {
+            color: #f4c430;
+            content: "★";
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def reset_setup() -> None:
     for key in [
         "coder_name",
+        "annotation_mode",
         "clean_coding_mode",
         "setup_complete",
         "review_item_id",
@@ -600,11 +710,10 @@ def render_option_selector(
         selected = []
         st.caption(helper_empty)
 
-    added = st.text_area(
+    added = st.text_input(
         f"Add {label.lower()}",
-        help="Add multiple values separated by new lines, commas, or semicolons.",
-        placeholder="One per line, or comma-separated",
-        height=110,
+        help="Add multiple values separated by commas or semicolons.",
+        placeholder="Comma- or semicolon-separated",
         key=f"{key_prefix}_added",
     )
 
@@ -614,37 +723,53 @@ def render_option_selector(
 def main() -> None:
     st.set_page_config(page_title="sTechLab Labeler Annotation", layout="wide")
     disable_enter_submit()
+    apply_app_styles()
     st.title("sTechLab Labeler Content Annotation")
 
     config = load_app_config()
     collection_date = collection_date_from_config(config)
-    input_path = processed_csv_path(config, collection_date)
     annotation_root = annotations_root(config)
     configured_tags = load_options(TAGS_PATH)
+    configured_labels = load_options(LABELS_PATH)
+
+    if (
+        st.session_state.get("setup_complete")
+        and "annotation_mode" not in st.session_state
+    ):
+        st.session_state.pop("setup_complete", None)
+
+    if not st.session_state.get("setup_complete"):
+        render_setup_screen(collection_date)
+
+    coder_name = st.session_state["coder_name"]
+    annotation_mode = st.session_state["annotation_mode"]
+    input_path = processed_csv_path(config, collection_date, annotation_mode)
 
     if not input_path.is_file():
         st.error(f"Processed annotation CSV not found: {input_path}")
-        st.info("Add the sample CSV at the configured path, then restart the app.")
+        st.info("Add the selected dataset CSV at the configured path, then restart the app.")
         st.stop()
 
     posts = load_posts(str(input_path))
-    input_label = f"{collection_date}/{input_path.name}"
-
     posts, missing_columns = ensure_post_columns(posts)
+    posts = order_posts_for_mode(
+        posts,
+        annotation_mode,
+        coder_name,
+        collection_date,
+    )
     if missing_columns:
         st.warning("Missing columns added as blanks: " + ", ".join(missing_columns))
 
-    if not st.session_state.get("setup_complete"):
-        render_setup_screen(collection_date, input_label, len(posts))
-
-    coder_name = st.session_state["coder_name"]
-    clean_coding_mode = bool(st.session_state["clean_coding_mode"])
-
-    annotation_path = annotation_file_path(annotation_root, coder_name)
+    annotation_path = annotation_file_path(
+        annotation_root,
+        coder_name,
+        annotation_mode,
+    )
     all_annotations = load_annotations(annotation_path)
     coder_annotations = latest_rows_for_coder(all_annotations, coder_name)
     handled = handled_item_ids(coder_annotations, coder_name)
-    annotated_count, skipped_count, remaining_count = progress_counts(
+    annotated_count, skipped_count, _ = progress_counts(
         posts,
         all_annotations,
         coder_name,
@@ -652,18 +777,29 @@ def main() -> None:
 
     coder_tags = options_from_annotations(coder_annotations, "tags_final")
     coder_labels = options_from_annotations(coder_annotations, "labels_final")
-    tags_options = coder_tags if clean_coding_mode else unique_values(configured_tags + coder_tags)
-    labels_options = coder_labels
+    tags_options = available_coding_options(
+        configured_tags,
+        coder_tags,
+        annotation_mode,
+    )
+    labels_options = available_coding_options(
+        configured_labels,
+        coder_labels,
+        annotation_mode,
+    )
 
     st.sidebar.markdown("### Session")
     st.sidebar.write(f"Coder: {coder_name}")
-    st.sidebar.write(f"Mode: {'Clean' if clean_coding_mode else 'Codebook'}")
+    st.sidebar.write(f"Dataset: {annotation_mode}")
     if st.sidebar.button("Change coder / mode"):
         reset_setup()
     st.sidebar.markdown("### Progress")
-    st.sidebar.metric("Annotated", f"{annotated_count} / {len(posts)}")
-    st.sidebar.metric("Skipped", skipped_count)
-    st.sidebar.metric("Remaining", remaining_count)
+    st.sidebar.metric(
+        "Annotated (Skipped)",
+        f"{annotated_count}/{len(posts)} ({skipped_count})",
+    )
+    progress_value = handled_progress(annotated_count, skipped_count, len(posts))
+    st.sidebar.progress(progress_value)
 
     st.sidebar.markdown("---")
     st.sidebar.markdown("### Finish")
@@ -672,7 +808,7 @@ def main() -> None:
         st.sidebar.download_button(
             "⬇ Download my annotations CSV",
             coder_annotations.to_csv(index=False).encode("utf-8"),
-            file_name=f"{safe_coder_slug(coder_name)}_annotations.csv",
+            file_name=annotation_path.name,
             mime="text/csv",
             use_container_width=True,
             type="primary",
@@ -724,15 +860,13 @@ def main() -> None:
     left, right = st.columns([1.2, 1])
 
     with left:
-        st.subheader(f"Post {current_number} of {len(posts)}")
+        progress_header, item_header = st.columns([3, 1])
+        progress_header.subheader(f"Post {current_number} of {len(posts)}")
+        item_header.subheader(f"Item {item_id}")
         display_post(post)
 
     with right:
         st.subheader("Edit annotation" if is_reviewing else "Coding form")
-        if coder_tags:
-            st.caption("Your tags so far: " + ", ".join(coder_tags))
-        if coder_labels:
-            st.caption("Your labels so far: " + ", ".join(coder_labels))
 
         existing_tags = split_values(existing.get("tags_final"))
         existing_labels = split_values(existing.get("labels_final"))
@@ -741,7 +875,8 @@ def main() -> None:
         existing_version = safe_value(existing.get("annotation_datetime"))
         version_hash = hashlib.sha256(existing_version.encode("utf-8")).hexdigest()[:8]
         key_prefix = (
-            f"annotation_{safe_coder_slug(coder_name)}_{item_id}_{version_hash}"
+            f"annotation_{safe_coder_slug(coder_name)}_{annotation_mode.lower()}_"
+            f"{item_id}_{version_hash}"
         )
 
         with st.form(f"{key_prefix}_form"):
@@ -775,10 +910,16 @@ def main() -> None:
                 f"{key_prefix}_labels",
             )
 
-            coder_notes = st.text_area(
+            coder_notes = st.text_input(
                 "Notes / skip reason (optional)",
                 value=safe_value(existing.get("coder_notes")),
                 key=f"{key_prefix}_notes",
+            )
+            starred = st.checkbox(
+                "Interesting",
+                value=value_is_true(existing.get("star")),
+                help="Star posts that are especially useful or worth revisiting.",
+                key=f"{key_prefix}_star",
             )
 
             submit_col, skip_col, back_col = st.columns(3)
@@ -801,13 +942,14 @@ def main() -> None:
             row = build_annotation_row(
                 post=post,
                 coder_name=coder_name,
-                clean_coding_mode=clean_coding_mode,
+                annotation_mode=annotation_mode,
                 skipped=skipped,
                 is_relevant=is_relevant,
                 tags_selected=tags_selected,
                 tags_added=split_values(tags_added_text),
                 labels_selected=labels_selected,
                 labels_added=split_values(labels_added_text),
+                starred=starred,
                 coder_notes=coder_notes,
             )
             save_annotation(annotation_path, row)

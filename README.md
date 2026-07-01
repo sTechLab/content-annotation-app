@@ -1,6 +1,6 @@
 # Content Annotation App
 
-Streamlit app for coding a fixed sample of Bluesky posts. Each coder works through the same posts and downloads a personal annotations CSV when finished.
+Streamlit app for coding Bluesky posts. Sample mode uses the same fixed 98 posts for every coder; Full mode uses all posts in a stable coder-specific random order and includes preset tags and labels.
 
 ## Run locally
 
@@ -9,10 +9,11 @@ pip install -r requirements.txt
 streamlit run app/annotation_app.py
 ```
 
-The deployed sample is configured in `config/config.json` and stored at:
+The deployed datasets are configured in `config/config.json` and stored at:
 
 ```text
 data/processed/YYYY-MM-DD/enriched_results_sample.csv
+data/processed/YYYY-MM-DD/enriched_results.csv
 ```
 
 ## Deploy
