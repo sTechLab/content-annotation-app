@@ -279,6 +279,62 @@ def next_unhandled_post(posts: pd.DataFrame, handled: set[str]) -> pd.Series | N
     return None
 
 
+def post_for_item_id(posts: pd.DataFrame, item_id: str) -> pd.Series | None:
+    """Return the post with the requested item ID."""
+    for _, row in posts.iterrows():
+        if safe_value(row.get("item_id")) == item_id:
+            return row
+    return None
+
+
+def post_number_for_item_id(posts: pd.DataFrame, item_id: str) -> int:
+    """Return the one-based position of an item in the annotation input."""
+    for position, (_, row) in enumerate(posts.iterrows(), start=1):
+        if safe_value(row.get("item_id")) == item_id:
+            return position
+    return 0
+
+
+def previous_handled_item_id(
+    posts: pd.DataFrame,
+    handled: set[str],
+    before_item_id: str | None = None,
+) -> str | None:
+    """Return the nearest handled item before another post in input order."""
+    ordered_item_ids = [
+        safe_value(row.get("item_id"))
+        for _, row in posts.iterrows()
+        if safe_value(row.get("item_id"))
+    ]
+    before_index = len(ordered_item_ids)
+
+    if before_item_id:
+        try:
+            before_index = ordered_item_ids.index(before_item_id)
+        except ValueError:
+            return None
+
+    for item_id in reversed(ordered_item_ids[:before_index]):
+        if item_id in handled:
+            return item_id
+    return None
+
+
+def next_item_id(posts: pd.DataFrame, after_item_id: str) -> str | None:
+    """Return the item immediately after another post in input order."""
+    ordered_item_ids = [
+        safe_value(row.get("item_id"))
+        for _, row in posts.iterrows()
+        if safe_value(row.get("item_id"))
+    ]
+    try:
+        next_index = ordered_item_ids.index(after_item_id) + 1
+    except ValueError:
+        return None
+
+    return ordered_item_ids[next_index] if next_index < len(ordered_item_ids) else None
+
+
 def options_from_annotations(annotations: pd.DataFrame, column: str) -> list[str]:
     if annotations.empty or column not in annotations.columns:
         return []
@@ -315,6 +371,12 @@ def build_annotation_row(
 ) -> dict[str, Any]:
     item_id = safe_value(post.get("item_id"))
     now = utc_now_iso()
+    if skipped:
+        tags_selected = []
+        tags_added = []
+        labels_selected = []
+        labels_added = []
+
     row = {
         "annotation_id": stable_annotation_id(coder_name, item_id),
         "annotation_datetime": now,
@@ -510,7 +572,12 @@ def disable_enter_submit() -> None:
 
 
 def reset_setup() -> None:
-    for key in ["coder_name", "clean_coding_mode", "setup_complete"]:
+    for key in [
+        "coder_name",
+        "clean_coding_mode",
+        "setup_complete",
+        "review_item_id",
+    ]:
         st.session_state.pop(key, None)
     rerun_app()
 
@@ -519,9 +586,16 @@ def render_option_selector(
     label: str,
     options: list[str],
     helper_empty: str,
+    default_selected: list[str],
+    key_prefix: str,
 ) -> tuple[list[str], str]:
     if options:
-        selected = st.multiselect(label, options)
+        selected = st.multiselect(
+            label,
+            options,
+            default=[value for value in default_selected if value in options],
+            key=f"{key_prefix}_selected",
+        )
     else:
         selected = []
         st.caption(helper_empty)
@@ -531,6 +605,7 @@ def render_option_selector(
         help="Add multiple values separated by new lines, commas, or semicolons.",
         placeholder="One per line, or comma-separated",
         height=110,
+        key=f"{key_prefix}_added",
     )
 
     return selected, added
@@ -605,18 +680,46 @@ def main() -> None:
     else:
         st.sidebar.info("Your download button will appear after your first save.")
 
-    post = next_unhandled_post(posts, handled)
+    current_post = next_unhandled_post(posts, handled)
+    review_item_id = safe_value(st.session_state.get("review_item_id"))
+    review_post = (
+        post_for_item_id(posts, review_item_id)
+        if review_item_id and review_item_id in handled
+        else None
+    )
+    if review_item_id and review_post is None:
+        st.session_state.pop("review_item_id", None)
+
+    is_reviewing = review_post is not None
+    post = review_post if is_reviewing else current_post
 
     if post is None:
         st.success(
             "No posts left for this coder. Download your annotations CSV from "
             "the sidebar and send it back before closing the app."
         )
+        previous_item_id = previous_handled_item_id(posts, handled)
+        if previous_item_id and st.button("Back to previous answer"):
+            st.session_state["review_item_id"] = previous_item_id
+            rerun_app()
         st.stop()
 
     item_id = safe_value(post.get("item_id"))
     existing = latest_annotation(coder_annotations, coder_name, item_id)
-    current_number = len(handled) + 1
+    current_number = post_number_for_item_id(posts, item_id)
+    previous_item_id = previous_handled_item_id(posts, handled, item_id)
+
+    if is_reviewing:
+        st.info(
+            "You are editing a saved answer. Changes are saved only when you "
+            "select Save changes or Mark skipped."
+        )
+        return_label = (
+            "Return to current post" if current_post is not None else "Return to completion"
+        )
+        if st.button(return_label):
+            st.session_state.pop("review_item_id", None)
+            rerun_app()
 
     left, right = st.columns([1.2, 1])
 
@@ -625,48 +728,76 @@ def main() -> None:
         display_post(post)
 
     with right:
-        st.subheader("Coding form")
+        st.subheader("Edit annotation" if is_reviewing else "Coding form")
         if coder_tags:
             st.caption("Your tags so far: " + ", ".join(coder_tags))
         if coder_labels:
             st.caption("Your labels so far: " + ", ".join(coder_labels))
 
-        with st.form(f"annotation_form_{item_id}"):
+        existing_tags = split_values(existing.get("tags_final"))
+        existing_labels = split_values(existing.get("labels_final"))
+        post_tags_options = unique_values(tags_options + existing_tags)
+        post_labels_options = unique_values(labels_options + existing_labels)
+        existing_version = safe_value(existing.get("annotation_datetime"))
+        version_hash = hashlib.sha256(existing_version.encode("utf-8")).hexdigest()[:8]
+        key_prefix = (
+            f"annotation_{safe_coder_slug(coder_name)}_{item_id}_{version_hash}"
+        )
+
+        with st.form(f"{key_prefix}_form"):
             relevant_options = ["Yes", "No", "Unclear"]
             existing_relevance = safe_value(existing.get("is_relevant"))
             relevance_index = (
                 relevant_options.index(existing_relevance)
                 if existing_relevance in relevant_options
-                else 0
+                else None if is_reviewing else 0
             )
             is_relevant = st.radio(
                 "Is the post relevant?",
                 relevant_options,
                 index=relevance_index,
                 horizontal=True,
+                key=f"{key_prefix}_relevance",
             )
 
             tags_selected, tags_added_text = render_option_selector(
                 "Tags",
-                tags_options,
+                post_tags_options,
                 "No saved tags yet. Add the first one below.",
+                existing_tags,
+                f"{key_prefix}_tags",
             )
             labels_selected, labels_added_text = render_option_selector(
                 "Labels mentioned",
-                labels_options,
+                post_labels_options,
                 "No saved labels yet. Add the first one below.",
+                existing_labels,
+                f"{key_prefix}_labels",
             )
 
             coder_notes = st.text_area(
                 "Notes / skip reason (optional)",
                 value=safe_value(existing.get("coder_notes")),
+                key=f"{key_prefix}_notes",
             )
 
-            submit_col, skip_col = st.columns(2)
-            submitted = submit_col.form_submit_button("Submit")
-            skipped = skip_col.form_submit_button("Skip")
+            submit_col, skip_col, back_col = st.columns(3)
+            submit_label = "Save changes" if is_reviewing else "Submit"
+            skip_label = "Mark skipped" if is_reviewing else "Skip"
+            submitted = submit_col.form_submit_button(submit_label)
+            skipped = skip_col.form_submit_button(skip_label)
+            went_back = back_col.form_submit_button(
+                "Back",
+                disabled=previous_item_id is None,
+            )
 
-        if submitted or skipped:
+        if went_back and previous_item_id:
+            st.session_state["review_item_id"] = previous_item_id
+            rerun_app()
+
+        if submitted and not is_relevant:
+            st.error("Choose Yes, No, or Unclear before saving this annotation.")
+        elif submitted or skipped:
             row = build_annotation_row(
                 post=post,
                 coder_name=coder_name,
@@ -680,6 +811,11 @@ def main() -> None:
                 coder_notes=coder_notes,
             )
             save_annotation(annotation_path, row)
+            next_id = next_item_id(posts, item_id) if is_reviewing else None
+            if next_id and next_id in handled:
+                st.session_state["review_item_id"] = next_id
+            else:
+                st.session_state.pop("review_item_id", None)
             st.success("Saved. Remember to download your CSV when finished.")
             rerun_app()
 
