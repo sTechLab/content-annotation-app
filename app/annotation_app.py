@@ -116,11 +116,48 @@ def load_app_config() -> dict[str, Any]:
     return config
 
 
+def load_option_config(path: Path) -> tuple[list[str], dict[str, str]]:
+    """Load coding options from either a string list or structured config."""
+    config = load_json(path, [])
+    options: list[str] = []
+    definitions: dict[str, str] = {}
+
+    if isinstance(config, dict):
+        config = [
+            {"name": name, "definition": definition}
+            for name, definition in config.items()
+        ]
+
+    if not isinstance(config, list):
+        return options, definitions
+
+    for entry in config:
+        if isinstance(entry, str):
+            name = entry.strip()
+            definition = ""
+        elif isinstance(entry, dict):
+            name = safe_value(
+                entry.get("name") or entry.get("label") or entry.get("value")
+            ).strip()
+            definition = safe_value(
+                entry.get("definition")
+                or entry.get("description")
+                or entry.get("help")
+            ).strip()
+        else:
+            continue
+
+        if not name:
+            continue
+        options.append(name)
+        definitions[name] = definition
+
+    return unique_values(options), definitions
+
+
 def load_options(path: Path) -> list[str]:
-    options = load_json(path, [])
-    if not isinstance(options, list):
-        return []
-    return [str(option) for option in options]
+    options, _ = load_option_config(path)
+    return options
 
 
 def collection_date_from_config(config: dict[str, Any]) -> str:
@@ -698,13 +735,29 @@ def render_option_selector(
     helper_empty: str,
     default_selected: list[str],
     key_prefix: str,
+    definitions: dict[str, str] | None = None,
 ) -> tuple[list[str], str]:
+    definitions = definitions or {}
+    definition_options = [option for option in options if option in definitions]
+    label_visibility = "visible"
+
+    if definition_options:
+        label_col, help_col = st.columns([0.88, 0.12])
+        label_col.markdown(f"**{label}**")
+        with help_col.popover("?"):
+            st.markdown("**Tag definitions**")
+            for option in definition_options:
+                st.markdown(f"**{option}**")
+                st.caption(definitions.get(option) or "No definition yet.")
+        label_visibility = "collapsed"
+
     if options:
         selected = st.multiselect(
             label,
             options,
             default=[value for value in default_selected if value in options],
             key=f"{key_prefix}_selected",
+            label_visibility=label_visibility,
         )
     else:
         selected = []
@@ -729,7 +782,7 @@ def main() -> None:
     config = load_app_config()
     collection_date = collection_date_from_config(config)
     annotation_root = annotations_root(config)
-    configured_tags = load_options(TAGS_PATH)
+    configured_tags, tag_definitions = load_option_config(TAGS_PATH)
     configured_labels = load_options(LABELS_PATH)
 
     if (
@@ -901,6 +954,7 @@ def main() -> None:
                 "No saved tags yet. Add the first one below.",
                 existing_tags,
                 f"{key_prefix}_tags",
+                tag_definitions if annotation_mode == FULL_MODE else {},
             )
             labels_selected, labels_added_text = render_option_selector(
                 "Labels mentioned",

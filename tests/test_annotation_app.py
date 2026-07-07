@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -68,6 +69,31 @@ class AnnotationNavigationTests(unittest.TestCase):
             ),
             ["Recommendation", "Criticism"],
         )
+
+    def test_structured_option_config_loads_names_and_definitions(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            path = Path(temporary_directory) / "tags.json"
+            path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "name": "Recommendation",
+                            "definition": "Recommends the labeler to others.",
+                        },
+                        "Coder-added style",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            options, definitions = annotation_app.load_option_config(path)
+
+        self.assertEqual(options, ["Recommendation", "Coder-added style"])
+        self.assertEqual(
+            definitions["Recommendation"],
+            "Recommends the labeler to others.",
+        )
+        self.assertEqual(definitions["Coder-added style"], "")
 
     def test_sample_order_is_fixed_and_full_order_is_stable_per_coder(self) -> None:
         posts = pd.DataFrame({"item_id": [str(value) for value in range(20)]})

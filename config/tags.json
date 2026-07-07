@@ -1,17 +1,66 @@
 [
-  "Call out behavior",
-  "Self use example",
-  "Label interpretation",
-  "Recommendation",
-  "User behavior change",
-  "Creator behavior change",
-  "Reaction to being labeled - Self humor",
-  "Reaction to being labeled - Angry/Complaint",
-  "Reaction to being labeled: - Other",
-  "User label clarification",
-  "Technical issue report",
-  "Suggestion",
-  "Negative mention",
-  "Humor",
-  "Used as part of a conversation"
+  {
+    "name": "Behavior Callout",
+    "definition": "Points out a user’s behavior that is highlighted by the label, either in text and/or in a screenshot. References the labels to say something about a user."
+  },
+  {
+    "name": "Label Interpretation",
+    "definition": "A personal understanding or interpretation of the label’s meaning."
+  },
+  {
+    "name": "Recommendation",
+    "definition": "Recommends the labeler to others; could also include a link."
+  },
+  {
+    "name": "Self-Use Experience",
+    "definition": "A description of someone’s experience with the labeler or how someone uses the label; could also include a link."
+  },
+  {
+    "name": "User Behavior Change",
+    "definition": "Describes avoiding or changing interaction with a labeled account."
+  },
+  {
+    "name": "Creator Behavior Change",
+    "definition": "Self-monitoring or self-regulation due to being labeled or trying to avoid being labeled."
+  },
+  {
+    "name": "Reaction to Being Labeled — Self-Directed Humor",
+    "definition": "Self-disclosure of being labeled and a humorous reaction to that."
+  },
+  {
+    "name": "Reaction to Being Labeled — Angry/Complaint",
+    "definition": "Self-disclosure of being labeled and a complaint about it or about its reliability."
+  },
+  {
+    "name": "Reaction to Being Labeled — Other",
+    "definition": "Self-disclosure of being labeled and a reaction to that."
+  },
+  {
+    "name": "Humor",
+    "definition": ""
+  },
+  {
+    "name": "Negative Reaction",
+    "definition": "Criticism of the labeler."
+  },
+  {
+    "name": "Mentioned as Part of a Conversation",
+    "definition": "When the labeler or a label is casually mentioned as part of a discussion and is not directly the focus of the post."
+  },
+  {
+    "name": "Other Reactions in the Data",
+    "definition": ""
+  },
+  {
+    "name": "Technical Issue Report",
+    "definition": "A user mentions that the labeler is down, not working, etc."
+  },
+  {
+    "name": "User Label Clarification",
+    "definition": "When an unsubscribed user sees the labels in another user’s post, usually as a screenshot, and asks about them."
+  },
+  {
+    "name": "Feature/Label Suggestion",
+    "definition": "New label suggestions, label edits, or reactions to new/changed labels, etc."
+  }
 ]
