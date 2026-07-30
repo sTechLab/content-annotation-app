@@ -1,19 +1,19 @@
 [
   {
     "name": "Behavior Callout",
-    "definition": "Points out a user’s behavior that is highlighted by the label, either in text and/or in a screenshot. References the labels to say something about a user."
+    "definition": "Points out a user's behavior that is highlighted by the label, either in text or in a screenshot. References the labels to say something about a user."
   },
   {
     "name": "Label Interpretation",
-    "definition": "A personal understanding or interpretation of the label’s meaning."
+    "definition": "A personal understanding or interpretation of the label's meaning."
   },
   {
     "name": "Recommendation",
-    "definition": "Recommends the labeler to others; could also include a link."
+    "definition": "Recommends the labeler to others; may include a link."
   },
   {
     "name": "Self-Use Experience",
-    "definition": "A description of someone’s experience with the labeler or how someone uses the label; could also include a link."
+    "definition": "Describes someone's experience with the labeler or how someone uses the labeler; may include a link."
   },
   {
     "name": "User Behavior Change",
@@ -21,23 +21,23 @@
   },
   {
     "name": "Creator Behavior Change",
-    "definition": "Self-monitoring or self-regulation due to being labeled or trying to avoid being labeled."
+    "definition": "Describes self-monitoring or self-regulation due to being labeled or trying to avoid being labeled."
   },
   {
-    "name": "Reaction to Being Labeled — Self-Directed Humor",
-    "definition": "Self-disclosure of being labeled and a humorous reaction to that."
+    "name": "Reaction to Being Labeled - Self-Directed Humor",
+    "definition": "Self-disclosure of being labeled with a humorous reaction."
   },
   {
-    "name": "Reaction to Being Labeled — Angry/Complaint",
-    "definition": "Self-disclosure of being labeled and a complaint about it or about its reliability."
+    "name": "Reaction to Being Labeled - Angry/Complaint",
+    "definition": "Self-disclosure of being labeled with a complaint about it or about its reliability."
   },
   {
-    "name": "Reaction to Being Labeled — Other",
-    "definition": "Self-disclosure of being labeled and a reaction to that."
+    "name": "Reaction to Being Labeled - Other",
+    "definition": "Self-disclosure of being labeled with a reaction that is not clearly humor or complaint."
   },
   {
     "name": "Humor",
-    "definition": ""
+    "definition": "The post uses humor, joking, sarcasm, or playful framing related to the labeler or labels."
   },
   {
     "name": "Negative Reaction",
@@ -45,22 +45,18 @@
   },
   {
     "name": "Mentioned as Part of a Conversation",
-    "definition": "When the labeler or a label is casually mentioned as part of a discussion and is not directly the focus of the post."
-  },
-  {
-    "name": "Other Reactions in the Data",
-    "definition": ""
+    "definition": "The labeler or a label is casually mentioned as part of a discussion and is not directly the focus of the post."
   },
   {
     "name": "Technical Issue Report",
-    "definition": "A user mentions that the labeler is down, not working, etc."
+    "definition": "A user mentions that the labeler is down, not working, incorrect, unavailable, or otherwise technically broken."
   },
   {
     "name": "User Label Clarification",
-    "definition": "When an unsubscribed user sees the labels in another user’s post, usually as a screenshot, and asks about them."
+    "definition": "An unsubscribed or confused user sees labels in another user's post, usually as a screenshot, and asks what they mean."
   },
   {
     "name": "Feature/Label Suggestion",
-    "definition": "New label suggestions, label edits, or reactions to new/changed labels, etc."
+    "definition": "New label suggestions, label edits, or reactions to new or changed labels."
   }
 ]
